@@ -1,0 +1,25 @@
+# HP - ingestion
+watchdog
+psutil
+xxhash
+pymupdf
+python-docx
+openpyxl
+python-pptx
+
+# Aaling - vision/OCR (no PyTorch!)
+rapidocr-onnxruntime>=1.3.24
+fastembed>=0.3.0
+PyMuPDF>=1.24.0
+numpy>=1.24.0,<2.0
+Pillow>=10.0.0
+onnxruntime>=1.16.0,<2.0
+
+# Appu - storage/search
+lancedb
+
+# Karthik - API layer
+fastapi
+uvicorn
+pyinstaller
+pydantic

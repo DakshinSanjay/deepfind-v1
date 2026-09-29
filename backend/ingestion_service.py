@@ -58,6 +58,8 @@ TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".py", ".rs", ".html",
 DOC_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
 PDF_EXTENSION = ".pdf"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".tiff", ".bmp"}
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a"}
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov"}
 
 DEBOUNCE_STABLE_CHECK_DELAY_SEC = 0.5
 MONITOR_POLL_INTERVAL_SEC = 2.5
@@ -283,6 +285,8 @@ def extract_text(file_path: str, ext: str) -> tuple[str, bool]:
             return _extract_plain_text(file_path), False
         elif ext in IMAGE_EXTENSIONS:
             return "", True  # images always go to Tier 2
+        elif ext in AUDIO_EXTENSIONS or ext in VIDEO_EXTENSIONS:
+            return "", False  # metadata and filenames are searchable without media extraction
         else:
             return "", False  # unsupported type, skip
     except Exception as e:
@@ -385,6 +389,8 @@ class IngestionService:
 
         if needs_ocr:
             base_doc["needs_ocr"] = True
+            if self._appu_callback:
+                self._appu_callback(base_doc)
             # Only enqueue Tier 2 work when the system isn't under load
             if not self.should_pause_tier2():
                 self._tier2_queue.put(base_doc)

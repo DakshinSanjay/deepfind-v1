@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Search,
   Settings,
@@ -29,15 +29,17 @@ interface SystemStatus {
 }
 
 const FILTERS = [
-  { id: "images", label: "Images", icon: ImageIcon, active: true },
-  { id: "documents", label: "Documents", icon: FileText, active: true },
-  { id: "audio", label: "Audio", icon: Music, active: false },
-  { id: "video", label: "Video", icon: Video, active: false },
+  { id: "images", label: "Images", icon: ImageIcon },
+  { id: "documents", label: "Documents", icon: FileText },
+  { id: "audio", label: "Audio", icon: Music },
+  { id: "video", label: "Video", icon: Video },
 ];
 
 const iconFor = (type: string) => {
-  if (type === "pdf" || type === "doc") return FileText;
-  if (type === "image") return ImageIcon;
+  if (["pdf", "doc", "docx", "xlsx", "pptx", "txt", "md"].includes(type)) return FileText;
+  if (["png", "jpg", "jpeg", "webp", "tiff", "bmp", "image"].includes(type)) return ImageIcon;
+  if (["mp3", "wav", "m4a"].includes(type)) return Music;
+  if (["mp4", "mkv", "mov"].includes(type)) return Video;
   return File;
 };
 
@@ -45,6 +47,8 @@ export default function App() {
   const [query, setQuery] = useState("receipt");
   const [activeFilters, setActiveFilters] = useState<string[]>(["images", "documents"]);
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [sysStatus, setSysStatus] = useState<SystemStatus | null>(null);
 
   // NEW: Settings Modal State
@@ -57,19 +61,42 @@ export default function App() {
   useEffect(() => {
     if (!query.trim()) {
       setResults([]);
+      setSearchError(null);
+      setIsSearching(false);
       return;
     }
+    if (activeFilters.length === 0) {
+      setResults([]);
+      setSearchError(null);
+      setIsSearching(false);
+      return;
+    }
+    const controller = new AbortController();
     const timeoutId = setTimeout(async () => {
+      setIsSearching(true);
+      setSearchError(null);
       try {
-        const res = await fetch(`http://localhost:8000/api/search?q=${encodeURIComponent(query)}`);
+        const params = new URLSearchParams({ q: query, filters: activeFilters.join(",") });
+        const res = await fetch(`http://localhost:8000/api/search?${params}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`Search failed (${res.status})`);
         const data: SearchResult[] = await res.json();
         setResults(data);
       } catch (err) {
-        console.error("Failed to fetch search results", err);
+        if (!controller.signal.aborted) {
+          setSearchError("DeepFind could not reach the local search service.");
+          setResults([]);
+        }
+      } finally {
+        if (!controller.signal.aborted) setIsSearching(false);
       }
-    }, 200);
-    return () => clearTimeout(timeoutId);
-  }, [query]);
+    }, 250);
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [query, activeFilters]);
 
   useEffect(() => {
     const fetchStatus = async () => {
@@ -84,8 +111,7 @@ export default function App() {
     return () => clearInterval(intervalId);
   }, []);
 
-  const toggleFilter = (id: string, active: boolean) => {
-    if (!active) return;
+  const toggleFilter = (id: string) => {
     setActiveFilters((prev) =>
       prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]
     );
@@ -120,32 +146,23 @@ export default function App() {
     }
   };
 
-  const filteredResults = useMemo(() => {
-    return results.filter((r) => {
-      const typeGroup = r.file_type === "image" ? "images" : "documents";
-      return activeFilters.includes(typeGroup);
-    });
-  }, [results, activeFilters]);
-
   return (
     <div className="df-root">
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
-        .df-root { --bg: #ffffff; --navy-900: #161f52; --navy-800: #1c2762; --navy-700: #26326f; --navy-600: #2f3c85; --teal: #2bb6c2; --teal-soft: #8fdee4; --icon-bg: #e3ebfb; --text-muted: #6b7280; --lavender: #aab1de; --lavender-dim: #7d84b8; font-family: 'Inter', sans-serif; background: var(--bg); min-height: 100vh; color: var(--navy-900); display: flex; flex-direction: column; }
+        .df-root { --bg: #ffffff; --navy-900: #161f52; --navy-800: #1c2762; --navy-700: #26326f; --navy-600: #2f3c85; --teal: #2bb6c2; --teal-soft: #8fdee4; --icon-bg: #e3ebfb; --text-muted: #6b7280; --lavender: #aab1de; --lavender-dim: #7d84b8; font-family: 'DejaVu Sans', sans-serif; background: var(--bg); min-height: 100vh; color: var(--navy-900); display: flex; flex-direction: column; }
         .df-topbar { display: flex; align-items: center; justify-content: space-between; padding: 22px 44px 0 44px; }
-        .df-wordmark { font-family: 'Source Serif 4', serif; font-weight: 700; font-size: 20px; color: var(--navy-900); letter-spacing: -0.01em; }
+        .df-wordmark { font-family: Georgia, serif; font-weight: 700; font-size: 20px; color: var(--navy-900); }
         .df-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); }
         .df-status-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--teal); transition: background 0.3s; }
         .df-settings { color: var(--text-muted); margin-left: 18px; cursor: pointer; transition: color 0.2s; }
         .df-settings:hover { color: var(--navy-900); }
         .df-hero { padding: 40px 44px 28px 44px; max-width: 720px; }
         .df-eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--teal); margin-bottom: 14px; }
-        .df-headline { font-family: 'Source Serif 4', serif; font-weight: 600; font-size: 34px; line-height: 1.18; color: var(--navy-900); margin-bottom: 12px; }
+        .df-headline { font-family: Georgia, serif; font-weight: 600; font-size: 34px; line-height: 1.18; color: var(--navy-900); margin-bottom: 12px; }
         .df-subtext { font-size: 15px; color: var(--text-muted); line-height: 1.5; max-width: 460px; }
         .df-filters { display: flex; gap: 10px; padding: 4px 44px 32px 44px; flex-wrap: wrap; }
-        .df-filter { display: flex; align-items: center; gap: 9px; padding: 8px 16px 8px 8px; border-radius: 999px; border: 1px solid #e7e9f2; background: #fff; cursor: pointer; }
+        .df-filter { display: flex; align-items: center; gap: 9px; padding: 8px 16px 8px 8px; border-radius: 999px; border: 1px solid #e7e9f2; background: #fff; cursor: pointer; font: inherit; }
         .df-filter[data-active="true"] { border-color: var(--navy-900); background: #f4f6ff; }
-        .df-filter[data-enabled="false"] { cursor: default; opacity: 0.45; }
         .df-filter-icon { width: 26px; height: 26px; border-radius: 999px; background: var(--icon-bg); display: flex; align-items: center; justify-content: center; color: var(--navy-900); }
         .df-filter-label { font-size: 13.5px; font-weight: 600; color: var(--navy-900); }
         .df-panel { background: linear-gradient(180deg, var(--navy-800), var(--navy-900)); margin: 0 44px 44px 44px; border-radius: 22px; padding: 30px 30px 20px 30px; flex: 1; display: flex; flex-direction: column; }
@@ -154,6 +171,7 @@ export default function App() {
         .df-searchbar input::placeholder { color: var(--lavender-dim); font-style: italic; }
         .df-searchbar svg { color: var(--teal-soft); }
         .df-results { display: flex; flex-direction: column; gap: 10px; flex: 1; }
+        .df-empty { color: var(--lavender); font-size: 14px; padding: 18px 4px; }
         .df-row { display: flex; align-items: center; gap: 14px; background: var(--navy-600); border-radius: 12px; padding: 14px 16px; cursor: pointer; }
         .df-row:hover { background: #37469a; }
         .df-row-icon { width: 36px; height: 36px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); display: flex; align-items: center; justify-content: center; color: var(--teal-soft); }
@@ -172,7 +190,7 @@ export default function App() {
         .df-modal-close { cursor: pointer; color: var(--text-muted); }
         .df-modal-field { margin-bottom: 18px; }
         .df-modal-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--navy-900); }
-        .df-modal-input { width: 100%; padding: 10px; border: 1px solid #e7e9f2; border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 14px; box-sizing: border-box; }
+        .df-modal-input { width: 100%; padding: 10px; border: 1px solid #e7e9f2; border-radius: 8px; font-family: 'DejaVu Sans', sans-serif; font-size: 14px; box-sizing: border-box; }
         .df-modal-slider { width: 100%; margin-top: 4px; }
         .df-modal-btn { background: var(--navy-900); color: #fff; border: none; padding: 12px; width: 100%; border-radius: 8px; font-weight: 600; cursor: pointer; margin-top: 10px; }
       `}</style>
@@ -234,10 +252,10 @@ export default function App() {
           const Icon = f.icon;
           const isActive = activeFilters.includes(f.id);
           return (
-            <div key={f.id} className="df-filter" data-active={f.active && isActive} data-enabled={f.active} onClick={() => toggleFilter(f.id, f.active)}>
+            <button key={f.id} type="button" className="df-filter" data-active={isActive} onClick={() => toggleFilter(f.id)}>
               <span className="df-filter-icon"><Icon size={13} /></span>
               <span className="df-filter-label">{f.label}</span>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -249,7 +267,18 @@ export default function App() {
         </div>
 
         <div className="df-results">
-          {filteredResults.map((r, idx) => {
+          {isSearching && <div className="df-empty">Searching your indexed files...</div>}
+          {!isSearching && searchError && <div className="df-empty" role="alert">{searchError}</div>}
+          {!isSearching && !searchError && results.length === 0 && (
+            <div className="df-empty">
+              {activeFilters.length === 0
+                ? "Choose at least one file type to search."
+                : query.trim()
+                  ? "No matching files found."
+                  : "Type to search your indexed files."}
+            </div>
+          )}
+          {!isSearching && results.map((r, idx) => {
             const Icon = iconFor(r.file_type);
             return (
               <div className="df-row" key={idx} onClick={() => handleReveal(r.file_path)}>

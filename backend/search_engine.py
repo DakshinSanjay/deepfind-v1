@@ -13,6 +13,7 @@ Member 3 (Appu) deliverable — Embedded Storage & Hybrid Search Engine
 import sys
 import time
 import uuid
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -57,7 +58,8 @@ class FileRecord(LanceModel):
 def _get_encoder() -> TextEmbedding:
     global _text_encoder
     if _text_encoder is None:
-        _text_encoder = TextEmbedding(model_name=CLIP_TEXT_MODEL)
+        cache_dir = os.environ.get("DEEPFIND_CLIP_CACHE_DIR", "./models/clip_cache")
+        _text_encoder = TextEmbedding(model_name=CLIP_TEXT_MODEL, cache_dir=cache_dir)
     return _text_encoder
 
 
@@ -78,7 +80,6 @@ def init_db(db_path: str):
     except Exception as e:
         _log_error("create_fts_index failed (FTS/keyword search will be unavailable)", e)
 
-    _get_encoder()
     return _table
 
 
@@ -143,7 +144,12 @@ def _snippet(content: str, length: int = 160) -> str:
     return flat[:length] + ("..." if len(flat) > length else "")
 
 
-def search(query_str: str, limit: int = 20, min_similarity: float = MIN_COSINE_SIMILARITY) -> list:
+def search(
+    query_str: str,
+    limit: int = 20,
+    min_similarity: float = MIN_COSINE_SIMILARITY,
+    file_types: Optional[set[str]] = None,
+) -> list:
     """Run keyword (FTS) + vector (CLIP text) search in parallel and fuse with RRF.
 
     min_similarity: cosine-similarity floor (0-1). Vector hits below this are
@@ -162,13 +168,21 @@ def search(query_str: str, limit: int = 20, min_similarity: float = MIN_COSINE_S
         _log_error("FTS/keyword search failed, falling back to vector-only results", e)
         kw_results = []
 
-    query_vector = next(_get_encoder().embed([query_str])).tolist()
-    raw_vec_results = (
-        _table.search(query_vector)
-        .metric("cosine")
-        .limit(limit * 2)
-        .to_list()
-    )
+    try:
+        query_vector = next(_get_encoder().embed([query_str])).tolist()
+        raw_vec_results = (
+            _table.search(query_vector)
+            .metric("cosine")
+            .limit(limit * 2)
+            .to_list()
+        )
+    except Exception as e:
+        _log_error("vector search unavailable, using keyword results", e)
+        raw_vec_results = []
+
+    if file_types is not None:
+        kw_results = [r for r in kw_results if r.get("file_type") in file_types]
+        raw_vec_results = [r for r in raw_vec_results if r.get("file_type") in file_types]
 
     # LanceDB's cosine metric returns "_distance" = 1 - cosine_similarity.
     vec_results = [
@@ -205,3 +219,9 @@ def search(query_str: str, limit: int = 20, min_similarity: float = MIN_COSINE_S
         )
 
     return results
+
+
+def count_rows() -> int:
+    """Return the number of indexed files in the open local table."""
+    _ensure_ready()
+    return _table.count_rows()

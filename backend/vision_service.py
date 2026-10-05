@@ -60,9 +60,21 @@ GC_EVERY_N_ITEMS = 15       # midpoint of your 10-20 target cadence
 # releases (the "en_PP-OCRv3" det/rec pair + en_dict.txt) — do NOT rely on
 # the multilingual bundle that ships by default with `pip install`.
 OCR_MODELS_DIR = Path(os.environ.get("DEEPFIND_OCR_MODELS_DIR", "./models/ocr_en"))
-DET_MODEL_PATH = str(OCR_MODELS_DIR / "en_PP-OCRv3_det_infer.onnx")
-REC_MODEL_PATH = str(OCR_MODELS_DIR / "en_PP-OCRv3_rec_infer.onnx")
-REC_KEYS_PATH = str(OCR_MODELS_DIR / "en_dict.txt")
+OCR_ACCURACY_MODELS_DIR = Path(
+    os.environ.get("DEEPFIND_OCR_ACCURACY_DIR", "./models/ocr_accuracy")
+)
+OCR_MODEL_PROFILES = {
+    "speed": (
+        str(OCR_MODELS_DIR / "en_PP-OCRv3_det_infer.onnx"),
+        str(OCR_MODELS_DIR / "en_PP-OCRv3_rec_infer.onnx"),
+        str(OCR_MODELS_DIR / "en_dict.txt"),
+    ),
+    "accuracy": (
+        str(OCR_ACCURACY_MODELS_DIR / "ch_PP-OCRv4_det_infer.onnx"),
+        str(OCR_ACCURACY_MODELS_DIR / "ch_PP-OCRv4_rec_infer.onnx"),
+        str(OCR_ACCURACY_MODELS_DIR / "ch_dict.txt"),
+    ),
+}
 
 CLIP_IMAGE_MODEL = "Qdrant/clip-ViT-B-32-vision"
 # fastembed's own default cache lives inside the OS temp dir, which gets
@@ -78,16 +90,28 @@ CLIP_CACHE_DIR = Path(os.environ.get("DEEPFIND_CLIP_CACHE_DIR", "./models/clip_c
 _ocr_engine: Optional[RapidOCR] = None
 _clip_model: Optional[ImageEmbedding] = None
 _items_processed = 0
+_model_profile = "speed"
+
+
+def set_model_profile(profile: str) -> None:
+    """Select OCR ONNX models; keep CLIP paired with the text search encoder."""
+    global _model_profile, _ocr_engine
+    if profile not in OCR_MODEL_PROFILES:
+        raise ValueError(f"Unsupported vision model profile: {profile}")
+    if profile != _model_profile:
+        _model_profile = profile
+        _ocr_engine = None
 
 
 def _get_ocr_engine() -> RapidOCR:
     global _ocr_engine
     if _ocr_engine is None:
-        logger.info("Loading RapidOCR (English-only models, capped threads)...")
+        det_model_path, rec_model_path, rec_keys_path = OCR_MODEL_PROFILES[_model_profile]
+        logger.info("Loading RapidOCR profile '%s' (capped threads)...", _model_profile)
         _ocr_engine = RapidOCR(
-            det_model_path=DET_MODEL_PATH,
-            rec_model_path=REC_MODEL_PATH,
-            rec_keys_path=REC_KEYS_PATH,
+            det_model_path=det_model_path,
+            rec_model_path=rec_model_path,
+            rec_keys_path=rec_keys_path,
             use_cls=False,  # skip angle classifier: fine for upright screenshots/
                             # scans, flip on if you expect rotated pages
             intra_op_num_threads=2,

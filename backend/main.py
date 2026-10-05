@@ -3,6 +3,7 @@ import subprocess
 import platform
 from pathlib import Path
 from dataclasses import asdict
+from typing import Literal
 
 import psutil
 from fastapi import FastAPI, HTTPException
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 
 import ingestion_service
 import search_engine
+import vision_service
 
 app = FastAPI()
 DB_PATH = Path(os.environ.get(
@@ -124,14 +126,22 @@ class SettingsPayload(BaseModel):
     cpu_limit: int
     ram_limit: int
     pause_on_battery: bool
+    model_profile: Literal["speed", "accuracy"] = "speed"
+    indexing_interval: Literal["realtime", "hourly", "daily"] = "realtime"
+
+
+INDEXING_INTERVAL = "realtime"
 
 @app.post("/api/settings")
 def update_settings(settings: SettingsPayload):
+    global INDEXING_INTERVAL
     paths = [os.path.expanduser(path) for path in settings.watched_paths]
     ingestion_service.update_limits(
         settings.cpu_limit, settings.ram_limit, settings.pause_on_battery
     )
-    ingestion_service.start_watcher(paths)
+    vision_service.set_model_profile(settings.model_profile)
+    INDEXING_INTERVAL = settings.indexing_interval
+    ingestion_service.start_watcher(paths, indexing_interval=INDEXING_INTERVAL)
     return {"status": "ok", "updated": settings.dict()}
 
 
@@ -146,5 +156,5 @@ def start_indexing(payload: IndexPayload):
     valid_paths = [path for path in paths if os.path.isdir(path)]
     if not valid_paths:
         raise HTTPException(status_code=400, detail="No valid directories to index")
-    ingestion_service.start_watcher(valid_paths)
+    ingestion_service.start_watcher(valid_paths, indexing_interval=INDEXING_INTERVAL)
     return {"status": "indexing", "paths": valid_paths}

@@ -16,6 +16,9 @@ import urllib.request
 from pathlib import Path
 
 OCR_DIR = Path(os.environ.get("DEEPFIND_OCR_MODELS_DIR", "./models/ocr_en"))
+OCR_ACCURACY_DIR = Path(
+    os.environ.get("DEEPFIND_OCR_ACCURACY_DIR", "./models/ocr_accuracy")
+)
 CLIP_CACHE_DIR = Path(os.environ.get("DEEPFIND_CLIP_CACHE_DIR", "./models/clip_cache"))
 
 # English-only RapidOCR trio — NOT the default multilingual bundle rapidocr
@@ -32,17 +35,34 @@ OCR_FILES = {
     ),
 }
 
+OCR_ACCURACY_FILES = {
+    "ch_PP-OCRv4_det_infer.onnx": (
+        "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx"
+    ),
+    "ch_PP-OCRv4_rec_infer.onnx": (
+        "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx"
+    ),
+    "ch_dict.txt": (
+        "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/release/2.7/ppocr/utils/ppocr_keys_v1.txt"
+    ),
+}
 
-def download_ocr_models() -> None:
-    OCR_DIR.mkdir(parents=True, exist_ok=True)
-    for filename, url in OCR_FILES.items():
-        dest = OCR_DIR / filename
+
+def _download_files(directory: Path, files: dict[str, str]) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    for filename, url in files.items():
+        dest = directory / filename
         if dest.exists():
             print(f"[skip] {dest} already exists")
             continue
         print(f"Downloading {filename} ...")
         urllib.request.urlretrieve(url, dest)
         print(f"  -> {dest}")
+
+
+def download_ocr_models() -> None:
+    _download_files(OCR_DIR, OCR_FILES)
+    _download_files(OCR_ACCURACY_DIR, OCR_ACCURACY_FILES)
 
 
 def download_clip_models() -> None:

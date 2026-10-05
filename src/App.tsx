@@ -28,6 +28,13 @@ interface SystemStatus {
   is_paused: boolean;
 }
 
+const MAX_RRF_SCORE = 2 / 61;
+
+const formatMatchScore = (score: number) => {
+  if (!Number.isFinite(score)) return 0;
+  return Math.round(Math.max(0, Math.min(1, score / MAX_RRF_SCORE)) * 100);
+};
+
 const FILTERS = [
   { id: "images", label: "Images", icon: ImageIcon },
   { id: "documents", label: "Documents", icon: FileText },
@@ -57,6 +64,9 @@ export default function App() {
   const [ramLimit, setRamLimit] = useState(75);
   const [pauseBattery, setPauseBattery] = useState(true);
   const [watchPath, setWatchPath] = useState("~/Downloads");
+  const [modelProfile, setModelProfile] = useState<"speed" | "accuracy">("speed");
+  const [indexingInterval, setIndexingInterval] = useState<"realtime" | "hourly" | "daily">("realtime");
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!query.trim()) {
@@ -130,19 +140,24 @@ export default function App() {
   // NEW: Save Settings to Backend
   const handleSaveSettings = async () => {
     try {
-      await fetch("http://localhost:8000/api/settings", {
+      setSettingsError(null);
+      const response = await fetch("http://localhost:8000/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           watched_paths: [watchPath],
           cpu_limit: cpuLimit,
           ram_limit: ramLimit,
-          pause_on_battery: pauseBattery
+          pause_on_battery: pauseBattery,
+          model_profile: modelProfile,
+          indexing_interval: indexingInterval
         }),
       });
+      if (!response.ok) throw new Error(`Settings failed (${response.status})`);
       setIsSettingsOpen(false);
     } catch (err) {
       console.error("Failed to save settings", err);
+      setSettingsError("DeepFind could not apply these settings.");
     }
   };
 
@@ -180,6 +195,9 @@ export default function App() {
         .df-row-path { font-size: 12px; color: var(--lavender-dim); margin-top: 1px; }
         .df-row-snippet { font-size: 12.5px; font-style: italic; color: var(--lavender); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .df-match { font-size: 12px; font-weight: 700; color: var(--navy-900); background: var(--teal-soft); padding: 5px 11px; border-radius: 999px; }
+        .df-match { display: flex; flex-direction: column; align-items: center; min-width: 68px; padding: 7px 10px; border-radius: 8px; line-height: 1.1; }
+        .df-match-score { font-size: 19px; font-weight: 800; }
+        .df-match-label { margin-top: 3px; font-size: 10px; text-transform: uppercase; }
         .df-panel-footer { display: flex; align-items: center; gap: 12px; padding: 18px 4px 0px 4px; font-size: 12px; color: var(--lavender-dim); margin-top: auto; }
         .df-divider { width: 1px; height: 11px; background: var(--lavender-dim); opacity: 0.5; }
         
@@ -193,6 +211,7 @@ export default function App() {
         .df-modal-input { width: 100%; padding: 10px; border: 1px solid #e7e9f2; border-radius: 8px; font-family: 'DejaVu Sans', sans-serif; font-size: 14px; box-sizing: border-box; }
         .df-modal-slider { width: 100%; margin-top: 4px; }
         .df-modal-btn { background: var(--navy-900); color: #fff; border: none; padding: 12px; width: 100%; border-radius: 8px; font-weight: 600; cursor: pointer; margin-top: 10px; }
+        .df-settings-error { color: #b42318; font-size: 13px; margin-top: 10px; }
       `}</style>
 
       {/* NEW: Settings Modal Overlay */}
@@ -210,6 +229,23 @@ export default function App() {
             </div>
 
             <div className="df-modal-field">
+              <label className="df-modal-label" htmlFor="model-profile">Vision and OCR model</label>
+              <select id="model-profile" className="df-modal-input" value={modelProfile} onChange={(e) => setModelProfile(e.target.value as "speed" | "accuracy")}>
+                <option value="speed">Speed (Base Models)</option>
+                <option value="accuracy">Accuracy (Large Models)</option>
+              </select>
+            </div>
+
+            <div className="df-modal-field">
+              <label className="df-modal-label" htmlFor="indexing-interval">Indexing frequency</label>
+              <select id="indexing-interval" className="df-modal-input" value={indexingInterval} onChange={(e) => setIndexingInterval(e.target.value as "realtime" | "hourly" | "daily")}>
+                <option value="realtime">Real-time / Instant</option>
+                <option value="hourly">Every 1 hour</option>
+                <option value="daily">Daily</option>
+              </select>
+            </div>
+
+            <div className="df-modal-field">
               <label className="df-modal-label">Max CPU Usage: {cpuLimit}%</label>
               <input type="range" min="10" max="100" value={cpuLimit} className="df-modal-slider" onChange={(e) => setCpuLimit(Number(e.target.value))} />
             </div>
@@ -224,6 +260,7 @@ export default function App() {
               <label htmlFor="battery" style={{ fontSize: '14px' }}>Pause heavy indexing on battery power</label>
             </div>
 
+            {settingsError && <div className="df-settings-error" role="alert">{settingsError}</div>}
             <button className="df-modal-btn" onClick={handleSaveSettings}>Save Configuration</button>
           </div>
         </div>
@@ -288,7 +325,10 @@ export default function App() {
                   <div className="df-row-path">{r.file_path}</div>
                   <div className="df-row-snippet">{r.snippet}</div>
                 </div>
-                <span className="df-match">{Math.round(r.score * 100)}% {r.match_type}</span>
+                <span className="df-match" aria-label={`${formatMatchScore(r.score)} percent match, ${r.match_type}`}>
+                  <span className="df-match-score">{formatMatchScore(r.score)}%</span>
+                  <span className="df-match-label">{r.match_type}</span>
+                </span>
               </div>
             );
           })}

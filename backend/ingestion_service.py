@@ -41,6 +41,7 @@ from typing import Callable, Optional
 import psutil
 import xxhash
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 
 logger = logging.getLogger("ingestion_service")
@@ -63,6 +64,7 @@ VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov"}
 
 DEBOUNCE_STABLE_CHECK_DELAY_SEC = 0.5
 MONITOR_POLL_INTERVAL_SEC = 2.5
+INDEXING_INTERVALS_SEC = {"hourly": 3600, "daily": 86400}
 
 APP_DATA_DIR = Path.home() / ".local_semantic_search"
 HASH_CACHE_PATH = APP_DATA_DIR / "hash_cache.json"
@@ -309,13 +311,20 @@ class IngestionService:
 
     # ---- public API -----------------------------------------------------
 
-    def start_watcher(self, paths: list[str]):
+    def start_watcher(self, paths: list[str], indexing_interval: str = "realtime"):
+        if indexing_interval not in {"realtime", *INDEXING_INTERVALS_SEC}:
+            raise ValueError(f"Unsupported indexing interval: {indexing_interval}")
         self.stop_watcher()  # clean restart if already running
         self._watched_paths = paths
         self.monitor.start()
 
         handler = _DebouncedHandler(self)
-        self._observer = Observer()
+        if indexing_interval == "realtime":
+            self._observer = Observer()
+        else:
+            self._observer = PollingObserver(
+                timeout=INDEXING_INTERVALS_SEC[indexing_interval]
+            )
         for p in paths:
             if os.path.isdir(p):
                 self._observer.schedule(handler, p, recursive=True)
@@ -457,8 +466,8 @@ class _DebouncedHandler(FileSystemEventHandler):
 
 _service = IngestionService()
 
-def start_watcher(paths: list[str]):
-    _service.start_watcher(paths)
+def start_watcher(paths: list[str], indexing_interval: str = "realtime"):
+    _service.start_watcher(paths, indexing_interval=indexing_interval)
 
 def stop_watcher():
     _service.stop_watcher()
